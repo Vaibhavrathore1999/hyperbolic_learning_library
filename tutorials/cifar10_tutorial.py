@@ -27,13 +27,24 @@ We will do the following steps in order:
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 # We use the Poincaré ball model for the purposes of this tutorial.
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from hypll.manifolds.poincare_ball import Curvature, PoincareBall
+from hypll.manifolds.euclidean import Euclidean
+
+import torch
+from tqdm import tqdm  # Add this to use progress bar
+
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 
 # Making the curvature a learnable parameter is usually suboptimal but can
 # make training smoother.
-manifold = PoincareBall(c=Curvature(requires_grad=True))
-
+manifold = PoincareBall(c=Curvature(value=1.0, requires_grad=False))
+# manifold=Euclidean()
 
 ########################################################################
 # 2. Load and normalize CIFAR10
@@ -56,20 +67,20 @@ transform = transforms.Compose(
 )
 
 
-batch_size = 4
+batch_size = 256
 
 trainset = torchvision.datasets.CIFAR10(
     root="./data", train=True, download=True, transform=transform
 )
 trainloader = torch.utils.data.DataLoader(
-    trainset, batch_size=batch_size, shuffle=True, num_workers=2
+    trainset, batch_size=batch_size, shuffle=True, num_workers=4
 )
 
 testset = torchvision.datasets.CIFAR10(
     root="./data", train=False, download=True, transform=transform
 )
 testloader = torch.utils.data.DataLoader(
-    testset, batch_size=batch_size, shuffle=False, num_workers=2
+    testset, batch_size=batch_size, shuffle=False, num_workers=4
 )
 
 classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
@@ -112,6 +123,7 @@ class Net(nn.Module):
 
 
 net = Net()
+net = Net().to(device)  # Send model to GPU (if available)
 
 ########################################################################
 # 4. Define a Loss function and optimizer
@@ -136,30 +148,28 @@ optimizer = RiemannianAdam(net.parameters(), lr=0.001)
 
 from hypll.tensors import TangentTensor
 
-for epoch in range(2):  # loop over the dataset multiple times
+from tqdm import tqdm
+
+for epoch in range(20):  # Loop over the dataset multiple times
     running_loss = 0.0
-    for i, data in enumerate(trainloader, 0):
-        # get the inputs; data is a list of [inputs, labels]
+    loop = tqdm(enumerate(trainloader), total=len(trainloader), desc=f"Epoch {epoch+1}")
+
+    for i, data in loop:
         inputs, labels = data
+        inputs, labels = inputs.to(device), labels.to(device)
 
-        # move the inputs to the manifold
-        tangents = TangentTensor(data=inputs, man_dim=1, manifold=manifold)
-        manifold_inputs = manifold.expmap(tangents)
+        # Move inputs to manifold
+        tangents = TangentTensor(data=inputs, man_dim=1, manifold=manifold).cuda(device)
+        manifold_inputs = manifold.expmap(tangents).cuda(device)
 
-        # zero the parameter gradients
         optimizer.zero_grad()
-
-        # forward + backward + optimize
         outputs = net(manifold_inputs)
         loss = criterion(outputs.tensor, labels)
         loss.backward()
         optimizer.step()
 
-        # print statistics
         running_loss += loss.item()
-        if i % 2000 == 1999:  # print every 2000 mini-batches
-            print(f"[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}")
-            running_loss = 0.0
+        loop.set_postfix(loss=running_loss / (i + 1))
 
 print("Finished Training")
 
@@ -175,7 +185,7 @@ torch.save(net.state_dict(), PATH)
 # Next, let's load back in our saved model (note: saving and re-loading the model
 # wasn't necessary here, we only did it to illustrate how to do so):
 
-net = Net()
+net = Net().to(device)
 net.load_state_dict(torch.load(PATH))
 
 ########################################################################
@@ -190,10 +200,10 @@ total = 0
 with torch.no_grad():
     for data in testloader:
         images, labels = data
-
+        images, labels = images.to(device), labels.to(device)
         # move the images to the manifold
-        tangents = TangentTensor(data=images, man_dim=1, manifold=manifold)
-        manifold_images = manifold.expmap(tangents)
+        tangents = TangentTensor(data=images, man_dim=1, manifold=manifold).cuda(device)
+        manifold_images = manifold.expmap(tangents).cuda(device)
 
         # calculate outputs by running images through the network
         outputs = net(manifold_images)
@@ -223,8 +233,8 @@ with torch.no_grad():
         images, labels = data
 
         # move the images to the manifold
-        tangents = TangentTensor(data=images, man_dim=1, manifold=manifold)
-        manifold_images = manifold.expmap(tangents)
+        tangents = TangentTensor(data=images, man_dim=1, manifold=manifold).cuda(device)
+        manifold_images = manifold.expmap(tangents).cuda(device)
 
         outputs = net(manifold_images)
         _, predictions = torch.max(outputs.tensor, 1)
@@ -239,48 +249,3 @@ for classname, correct_count in correct_pred.items():
     accuracy = 100 * float(correct_count) / total_pred[classname]
     print(f"Accuracy for class: {classname:5s} is {accuracy:.1f} %")
 
-
-########################################################################
-#
-# Training on GPU
-# ----------------
-# Just like how you transfer a Tensor onto the GPU, you transfer the neural
-# net onto the GPU.
-#
-# Let's first define our device as the first visible cuda device if we have
-# CUDA available:
-#
-# .. code:: python
-#
-#     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-#
-#
-# Assuming that we are on a CUDA machine, this should print a CUDA device:
-#
-# .. code:: python
-#
-#     print(device)
-#
-#
-# The rest of this section assumes that ``device`` is a CUDA device.
-#
-# Then these methods will recursively go over all modules and convert their
-# parameters and buffers to CUDA tensors:
-#
-# .. code:: python
-#
-#     net.to(device)
-#
-#
-# Remember that you will have to send the inputs and targets at every step
-# to the GPU too:
-#
-# .. code:: python
-#
-#         inputs, labels = data[0].to(device), data[1].to(device)
-#
-#
-# **Goals achieved**:
-#
-# - Train a small hyperbolic neural network to classify images.
-#

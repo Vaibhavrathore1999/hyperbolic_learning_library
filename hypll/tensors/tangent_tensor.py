@@ -99,7 +99,9 @@ class TangentTensor:
 
     def cuda(self, device=None):
         new_tensor = self.tensor.cuda(device)
-        new_manifold_points = self.manifold_points.cuda(device)
+        new_manifold_points = (
+            self.manifold_points.cuda(device) if self.manifold_points is not None else None
+        )
         return TangentTensor(
             data=new_tensor,
             manifold_points=new_manifold_points,
@@ -109,7 +111,9 @@ class TangentTensor:
 
     def cpu(self):
         new_tensor = self.tensor.cpu()
-        new_manifold_points = self.manifold_points.cpu()
+        new_manifold_points = (
+            self.manifold_points.cpu() if self.manifold_points is not None else None
+        )
         return TangentTensor(
             data=new_tensor,
             manifold_points=new_manifold_points,
@@ -119,13 +123,16 @@ class TangentTensor:
 
     def to(self, *args, **kwargs):
         new_tensor = self.tensor.to(*args, **kwargs)
-        new_manifold_points = self.manifold_points(*args, **kwargs)
+        new_manifold_points = (
+            self.manifold_points.to(*args, **kwargs) if self.manifold_points is not None else None
+        )
         return TangentTensor(
             data=new_tensor,
             manifold_points=new_manifold_points,
             manifold=self.manifold,
             man_dim=self.man_dim,
         )
+
 
     def size(self, dim: Optional[int] = None):
         if self.manifold_points is None:

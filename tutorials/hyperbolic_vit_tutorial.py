@@ -32,13 +32,15 @@ Please make sure to install the following packages before running this script:
 #######################################################
 # 0. Set the device and random seed for reproducibility
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import random
 
 import numpy as np
 import torch
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
 
 seed = 0
 
